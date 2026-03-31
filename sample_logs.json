@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-03-29T10:30:00Z",
+    "source": "sysmon",
+    "event_type": "process_create",
+    "user": "admin",
+    "host": "server01",
+    "process_name": "powershell.exe",
+    "command_line": "powershell.exe -enc ZQBjAGgAbwAgAGgAZQBsAGwAbwA=",
+    "parent_process": "cmd.exe"
+  },
+  {
+    "timestamp": "2026-03-29T10:40:00Z",
+    "source": "sysmon",
+    "event_type": "process_create",
+    "user": "jdoe",
+    "host": "server02",
+    "process_name": "notepad.exe",
+    "command_line": "notepad.exe notes.txt",
+    "parent_process": "explorer.exe"
+  },
+  {
+    "timestamp": "2026-03-29T10:50:00Z",
+    "source": "sysmon",
+    "event_type": "process_create",
+    "user": "svc-backup",
+    "host": "server03",
+    "process_name": "cmd.exe",
+    "command_line": "cmd.exe /c whoami",
+    "parent_process": "services.exe"
+  }
+]
