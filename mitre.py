@@ -1,4 +1,6 @@
-# mitre_mapper.py
+# mitre.py
+# Static MITRE ATT&CK technique mappings used by the rule-based detection engine.
+# For broader coverage, use mitre_lookup.py to load the full MITRE enterprise-attack.json.
 
 MITRE_MAPPINGS = {
     "powershell_encoded": {

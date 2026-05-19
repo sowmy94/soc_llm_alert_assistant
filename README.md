@@ -2,9 +2,11 @@
 
 ## Overview
 
-SOC LLM Alert Assistant is a proof-of-concept security automation system that analyzes security logs, detects suspicious activity using rule-based logic mapped to MITRE ATT&CK techniques, enriches alerts with Large Language Model (LLM) explanations, and stores results for search and investigation.
+SOC LLM Alert Assistant is a proof-of-concept security automation system that analyzes security logs, detects suspicious activity using rule-based logic mapped to MITRE ATT&CK techniques, enriches alerts with LLM-style explanations, and stores results for search and investigation.
 
 The system demonstrates how modern Security Operations Centers (SOC) can combine **Python automation, MITRE ATT&CK mapping, LLM analysis, and Elasticsearch-based threat hunting** to accelerate incident investigation.
+
+> **Note:** The LLM enrichment module (`llm_service.py`) is currently a rule-based stub that generates structured analyst notes. Replace the return values with real LLM API calls (e.g. Anthropic Claude, OpenAI) to add dynamic, context-aware analysis.
 
 ---
 
@@ -22,8 +24,8 @@ Detection Engine (MITRE technique mapping)
 LLM Enrichment (Explanation & remediation)
    ↓
 Alert Storage
-   ├ MongoDB (persistent storage)
-   └ Elasticsearch (threat hunting & search)
+   ├── MongoDB (persistent storage)
+   └── Elasticsearch (threat hunting & search)
 ```
 
 ---
@@ -32,12 +34,11 @@ Alert Storage
 
 * Log ingestion through FastAPI REST API
 * Log normalization for consistent data structure
-* Rule-based detection engine
-* MITRE ATT&CK technique mapping
-* LLM-powered alert explanation and remediation guidance
-* Alert storage in MongoDB
+* Rule-based detection engine with MITRE ATT&CK technique mapping
+* LLM-ready enrichment layer for analyst notes and remediation guidance
+* Alert persistence in MongoDB
 * Alert indexing in Elasticsearch for threat hunting
-* Simple SOC automation pipeline
+* Graceful Elasticsearch failure handling — MongoDB path is unaffected if ES is down
 
 ---
 
@@ -46,11 +47,11 @@ Alert Storage
 | Component          | Technology                 |
 | ------------------ | -------------------------- |
 | API Framework      | FastAPI                    |
-| Language           | Python                     |
+| Language           | Python 3.10+               |
 | Database           | MongoDB                    |
 | Search Engine      | Elasticsearch              |
 | Security Framework | MITRE ATT&CK               |
-| AI Integration     | Large Language Model (LLM) |
+| AI Integration     | LLM stub (pluggable)       |
 | Data Validation    | Pydantic                   |
 
 ---
@@ -59,55 +60,83 @@ Alert Storage
 
 ```
 soc_llm_alert_assistant/
-
-main.py
-ingest.py
-normalize.py
-detect.py
-mitre_lookup.py
-llm_service.py
-elastic_search.py
-database.py
-Data/
-   enterprise-attack.json
-README.md
+├── main.py           # FastAPI app, pipeline orchestration, API endpoints
+├── ingest.py         # Log file loading
+├── normalize.py      # Raw log → normalized schema
+├── detect.py         # Rule-based threat detection + MITRE keyword scanner
+├── mitre.py          # Static MITRE ATT&CK technique mappings
+├── mitre_lookup.py   # Full MITRE enterprise-attack.json loader & index builder
+├── llm_service.py    # Alert enrichment (analyst note + remediation guidance)
+├── elastic_search.py # Elasticsearch index management and document indexing
+├── database.py       # MongoDB connection and CRUD helpers
+├── requirement.txt   # Python dependencies
+├── sample_logs.json  # Sample log entries for testing
+└── Data/
+    └── enterprise-attack.json  # MITRE ATT&CK STIX bundle
 ```
+
+---
+
+## Alert Pipeline Data Flow
+
+Each log entry passes through these pipeline stages:
+
+| Stage        | Module            | Output key(s) added                                      |
+| ------------ | ----------------- | -------------------------------------------------------- |
+| Ingest       | `ingest.py`       | Raw log dict                                             |
+| Normalize    | `normalize.py`    | `alert_source`, `event_type`, `user`, `host`, etc.       |
+| Detect       | `detect.py`       | `matched`, `rule_name`, `severity`, `technique_id`, etc. |
+| LLM Enrich   | `llm_service.py`  | `summary`, `analyst_note`, `recommended_actions`         |
+| Store        | `database.py`     | MongoDB `_id`                                            |
+| Index        | `elastic_search.py` | Elasticsearch `_id`                                    |
 
 ---
 
 ## Detection Example
 
-Example suspicious activity detected by the system:
+Suspicious activity detected by the system:
 
 ```
-Process: powershell.exe
-Command: powershell.exe -enc SQBFAFgA
-Parent: winword.exe
+Process:  powershell.exe
+Command:  powershell.exe -enc SQBFAFgA
+Parent:   winword.exe
 ```
 
-Detection Output:
+Detection output:
 
-```
-Technique ID: T1059
-Technique Name: Command and Scripting Interpreter
-Severity: High
-Reason: Encoded PowerShell execution detected
+```json
+{
+  "matched": true,
+  "rule_name": "encoded_powershell_execution",
+  "severity": "high",
+  "technique_id": "T1059.001",
+  "technique_name": "PowerShell",
+  "tactic": "Execution",
+  "reason": "Encoded PowerShell execution detected"
+}
 ```
 
 ---
 
 ## MITRE ATT&CK Mapping
 
-Example mappings used in the detection engine:
+Static mappings used by the detection engine (`mitre.py`):
 
-| Technique ID | Technique Name                     |
-| ------------ | ---------------------------------- |
-| T1059        | Command and Scripting Interpreter  |
-| T1047        | Windows Management Instrumentation |
-| T1053        | Scheduled Task                     |
-| T1055        | Process Injection                  |
-| T1021        | Remote Services                    |
-| T1113        | Screen Capture                     |
+| Rule Key              | Technique ID | Technique Name       | Tactic    |
+| --------------------- | ------------ | -------------------- | --------- |
+| `powershell_encoded`  | T1059.001    | PowerShell           | Execution |
+| `suspicious_cmd`      | T1059.003    | Windows Command Shell| Execution |
+
+Keyword-based mappings used by `detect_mitre_from_alert`:
+
+| Keyword          | Technique ID | Technique Name                     |
+| ---------------- | ------------ | ---------------------------------- |
+| powershell       | T1059        | Command and Scripting Interpreter  |
+| wmi              | T1047        | Windows Management Instrumentation |
+| scheduled task   | T1053        | Scheduled Task                     |
+| process injection| T1055        | Process Injection                  |
+| screen capture   | T1113        | Screen Capture                     |
+| vnc              | T1021        | Remote Services                    |
 
 ---
 
@@ -115,35 +144,31 @@ Example mappings used in the detection engine:
 
 ### 1. Clone the repository
 
-```
+```bash
 git clone https://github.com/yourusername/soc-llm-alert-assistant.git
 cd soc-llm-alert-assistant
 ```
 
-### 2. Create virtual environment
+### 2. Create and activate a virtual environment
 
-```
+```bash
 python -m venv .venv
 ```
 
-Activate:
-
-Windows
-
-```
+Windows:
+```bash
 .venv\Scripts\activate
 ```
 
-Linux / Mac
-
-```
+Linux / Mac:
+```bash
 source .venv/bin/activate
 ```
 
 ### 3. Install dependencies
 
-```
-pip install fastapi uvicorn pymongo elasticsearch pydantic
+```bash
+pip install -r requirement.txt
 ```
 
 ---
@@ -152,31 +177,40 @@ pip install fastapi uvicorn pymongo elasticsearch pydantic
 
 ### MongoDB
 
-Ensure MongoDB is running locally
-
-```
+```bash
 mongod
 ```
 
----
+Default connection: `mongodb://localhost:27017/`
 
 ### Elasticsearch
 
-Ensure Elasticsearch is running
+Start Elasticsearch and verify it is reachable:
 
 ```
 http://localhost:9200
 ```
 
+The application will attempt to create the `soc-alerts` index at startup. If Elasticsearch is unavailable, startup continues and only the ES-indexing path will fail.
+
+---
+
+## Environment Variables
+
+| Variable        | Default                  | Description                          |
+| --------------- | ------------------------ | ------------------------------------ |
+| `ELASTIC_URL`   | `http://localhost:9200`  | Elasticsearch base URL               |
+| `ELASTIC_INDEX` | `soc-alerts`             | Name of the Elasticsearch index      |
+
 ---
 
 ## Run the Application
 
-```
+```bash
 uvicorn main:app --reload
 ```
 
-API documentation:
+Interactive API docs:
 
 ```
 http://127.0.0.1:8000/docs
@@ -186,13 +220,11 @@ http://127.0.0.1:8000/docs
 
 ## API Endpoints
 
-### Analyze Single Log
+### `POST /analyze-one-log` — Analyze a single log
 
-```
-POST /analyze-one-log
-```
+Submit a log entry for analysis. The enriched alert is stored in MongoDB and indexed in Elasticsearch.
 
-Example request:
+Request body:
 
 ```json
 {
@@ -207,52 +239,52 @@ Example request:
 }
 ```
 
-Response:
+Response fields:
 
-```
-Detection result
-MITRE technique mapping
-LLM explanation
-Alert stored in MongoDB
-Alert indexed in Elasticsearch
-```
-
----
-
-### Analyze Sample Logs
-
-```
-GET /analyze-logs
-```
-
-Processes sample log dataset.
+| Field                | Description                                 |
+| -------------------- | ------------------------------------------- |
+| `db_id`              | MongoDB ObjectId of the stored alert        |
+| `elasticsearch_id`   | Elasticsearch document ID (null if ES down) |
+| `elasticsearch_error`| Error message if ES indexing failed         |
+| `result`             | Full enriched alert document                |
 
 ---
 
-### Retrieve Stored Alert
+### `GET /analyze-logs` — Analyze the sample dataset
 
-```
-GET /stored-alerts/{alert_id}
-```
-
-Fetch stored alert from MongoDB.
+Processes all entries in `sample_logs.json` through the full pipeline and indexes each into Elasticsearch. A single ES failure does not abort the batch.
 
 ---
 
-## Example Alert Pipeline
+### `GET /stored-alerts/{alert_id}` — Retrieve a stored alert
 
-```
-Input Log
-    ↓
-Normalization
-    ↓
-Detection Rule
-    ↓
-MITRE Technique Mapping
-    ↓
-LLM Explanation
-    ↓
-Alert Storage
+Fetch a previously stored alert from MongoDB by its ObjectId string.
+
+---
+
+## Example Full Alert Document
+
+```json
+{
+  "timestamp": "2026-03-29T10:30:00Z",
+  "alert_source": "sysmon",
+  "event_type": "process_create",
+  "user": "admin",
+  "host": "server01",
+  "process_name": "powershell.exe",
+  "command_line": "powershell.exe -enc ZQBjAGgAbwAgAGgAZQBsAGwAbwA=",
+  "parent_process": "cmd.exe",
+  "matched": true,
+  "rule_name": "encoded_powershell_execution",
+  "severity": "high",
+  "reason": "Encoded PowerShell execution detected",
+  "technique_id": "T1059.001",
+  "technique_name": "PowerShell",
+  "tactic": "Execution",
+  "llm_summary": "Suspicious activity was detected on host server01. User admin executed powershell.exe.",
+  "analyst_note": "The alert was triggered because Encoded PowerShell execution detected. This behavior maps to MITRE ATT&CK T1059.001 (PowerShell) under the Execution tactic. The assigned severity is high.",
+  "recommended_actions": "Review the command line and parent process, verify whether the activity was authorized, check for related child processes or network connections, and isolate the endpoint if malicious behavior is confirmed."
+}
 ```
 
 ---
@@ -262,18 +294,19 @@ Alert Storage
 * SOC alert triage automation
 * Threat detection experimentation
 * MITRE ATT&CK based detection engineering
-* LLM-assisted security analysis
-* Security automation proof of concept
+* LLM-assisted security analysis proof of concept
+* Security automation pipeline reference implementation
 
 ---
 
 ## Future Improvements
 
-* Integration with SIEM log sources
-* Real-time log streaming
-* Automated response actions
-* Advanced threat hunting queries
-* Kibana dashboards
+* Plug in a real LLM API (Anthropic Claude, OpenAI) in `llm_service.py`
+* Integration with live SIEM log sources
+* Real-time log streaming via Kafka or similar
+* Automated response actions (endpoint isolation, user suspension)
+* Advanced Elasticsearch threat hunting queries
+* Kibana dashboards for alert visualization
 * RAG-based threat intelligence enrichment
 
 ---
@@ -281,7 +314,6 @@ Alert Storage
 ## Author
 
 Sowmya Srinivasan
-
 
 ---
 

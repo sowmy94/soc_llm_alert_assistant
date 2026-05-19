@@ -1,4 +1,6 @@
+from contextlib import asynccontextmanager
 from typing import Dict, Any, List
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -9,7 +11,15 @@ from llm_service import explain_and_remediate
 from database import insert_alert, get_alert
 from elastic_search import ensure_index, index_alert
 
-app = FastAPI(title="SOC LLM Alert Assistant", version="1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create the Elasticsearch index on startup if it doesn't exist
+    ensure_index()
+    yield
+
+
+app = FastAPI(title="SOC LLM Alert Assistant", version="1.0", lifespan=lifespan)
 
 
 class LogRequest(BaseModel):
@@ -29,9 +39,11 @@ def build_final_alert(
     detection: Dict[str, Any],
     llm_output: Dict[str, Any]
 ) -> Dict[str, Any]:
+    """Assemble the enriched alert document from pipeline stage outputs."""
     return {
         "timestamp": normalized_log.get("timestamp"),
-        "alert_source": normalized_log.get("source"),
+        # Bug fix: normalized_log uses "alert_source" (renamed from raw "source")
+        "alert_source": normalized_log.get("alert_source"),
         "event_type": normalized_log.get("event_type"),
         "user": normalized_log.get("user"),
         "host": normalized_log.get("host"),
@@ -46,15 +58,11 @@ def build_final_alert(
         "technique_name": detection.get("technique_name"),
         "tactic": detection.get("tactic"),
         "llm_summary": llm_output.get("summary"),
+        # Bug fix: llm_service returns "analyst_note" and "recommended_actions"
         "analyst_note": llm_output.get("analyst_note"),
         "recommended_actions": llm_output.get("recommended_actions"),
         "raw_log": raw_log
     }
-
-
-@app.on_event("startup")
-def startup_event():
-    ensure_index()
 
 
 @app.get("/")
@@ -64,6 +72,11 @@ def root():
 
 @app.get("/analyze-logs")
 def analyze_logs():
+    """
+    Process all logs in the sample dataset through the full alert pipeline.
+    Each log is normalized, checked for threats, enriched by the LLM, and
+    indexed into Elasticsearch. Returns all enriched alerts.
+    """
     raw_logs = load_logs()
     results: List[Dict[str, Any]] = []
 
@@ -72,12 +85,19 @@ def analyze_logs():
         detection = detect_threat(normalized_log)
         llm_output = explain_and_remediate(normalized_log, detection)
 
-        final_alert = build_final_alert(raw_log, normalized_log,
-                                         detection, llm_output)
-        es_id = index_alert(final_alert)
+        final_alert = build_final_alert(raw_log, normalized_log, detection, llm_output)
+
+        # Wrap ES indexing per-log so one failure doesn't abort the whole batch
+        es_id = None
+        es_error = None
+        try:
+            es_id = index_alert(final_alert)
+        except Exception as e:
+            es_error = str(e)
 
         results.append({
             "elasticsearch_id": es_id,
+            "elasticsearch_error": es_error,
             "result": final_alert
         })
 
@@ -86,8 +106,14 @@ def analyze_logs():
         "results": results
     }
 
+
 @app.post("/analyze-one-log")
 def analyze_one_log(log: LogRequest):
+    """
+    Analyze a single log entry submitted via the request body.
+    The alert is persisted to MongoDB and indexed in Elasticsearch.
+    Elasticsearch failures are non-fatal and reported in the response.
+    """
     raw_log = log.model_dump()
     normalized_log = normalize_log(raw_log)
     detection = detect_threat(normalized_log)
@@ -95,6 +121,7 @@ def analyze_one_log(log: LogRequest):
 
     final_alert = build_final_alert(raw_log, normalized_log, detection, llm_output)
 
+    # Strip any MongoDB _id field that might exist before inserting
     alert_to_store = final_alert.copy()
     alert_to_store.pop("_id", None)
 
@@ -117,10 +144,11 @@ def analyze_one_log(log: LogRequest):
         "elasticsearch_error": es_error,
         "result": final_alert
     }
-   
+
 
 @app.get("/stored-alerts/{alert_id}")
 def get_stored_alerts(alert_id: str):
+    """Fetch a previously stored alert from MongoDB by its ObjectId string."""
     alert = get_alert(alert_id)
     if alert:
         return {"alert": alert}
