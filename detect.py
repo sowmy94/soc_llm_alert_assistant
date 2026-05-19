@@ -1,10 +1,18 @@
-# detector.py
+# detect.py
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
 from mitre import MITRE_MAPPINGS
 
 
 def detect_threat(normalized_log: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Apply rule-based detection to a normalized log entry.
+
+    Checks process name and command-line arguments against known suspicious
+    patterns and returns a detection result with MITRE ATT&CK metadata.
+    Returns a low-severity no-match result if no rules fire.
+    """
     process_name = (normalized_log.get("process_name") or "").lower()
     command_line = (normalized_log.get("command_line") or "").lower()
 
@@ -42,10 +50,18 @@ def detect_threat(normalized_log: Dict[str, Any]) -> Dict[str, Any]:
         "tactic": None
     }
 
-def detect_mitre_from_alert(alert_text, mitre_lookup):
 
+def detect_mitre_from_alert(alert_text: str, mitre_lookup: Dict[str, str]) -> Optional[Dict[str, str]]:
+    """
+    Keyword-scan free-form alert text and return a MITRE technique match.
+
+    Looks for known keywords in the alert text and maps them to MITRE
+    technique IDs using the provided lookup dictionary.
+    Returns None if no keyword matches.
+    """
     alert_text = alert_text.lower()
 
+    # Map commonly observed alert keywords to their MITRE technique IDs
     keyword_map = {
         "powershell": "T1059",
         "wmi": "T1047",
@@ -56,11 +72,8 @@ def detect_mitre_from_alert(alert_text, mitre_lookup):
     }
 
     for keyword, technique_id in keyword_map.items():
-
         if keyword in alert_text:
-
             technique_name = mitre_lookup.get(technique_id)
-
             return {
                 "technique_id": technique_id,
                 "technique_name": technique_name
